@@ -31,7 +31,7 @@ def get_last_15th():
     previous_15_minute = now - timedelta(minutes=minutes_to_subtract, seconds=now.second, microseconds=now.microsecond)
     return previous_15_minute
 # Print the result
-forecast_end = get_last_15th()  
+forecast_end = get_last_15th() + timedelta(hours=fcst_thld) # + timedelta(hours=5,minutes=30)
 
 
 db_connection = get_connection(host=data_configs_map['host'],
@@ -170,12 +170,17 @@ for var in variables:
     if len(exim_files)> 0:
         target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
         for index,row in target_files.iterrows():
+            
             df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
                            timestamp=row['timestamp'],
                            forecast_timestamp=row['forecasted_for'],
                            variable=var,file_name=row['file'],
                            db_connection=db_connection,
                            data_connection=data_connection)
+            for x in variable_atts[row['variable']]:
+                if len(df)>0:
+                    df = df.loc[~df[x].isna(),:]
+                    
             resp = df.to_sql(schema='data_forecast',
                                  name=var.lower(),
                                  index=False,
