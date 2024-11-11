@@ -106,7 +106,7 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
             ## forecast_time search with old_source timestamp if old_source < new_source delete the forecast
             last_forecast_update = pd.read_sql_query(f"SELECT * FROM files_map_logs.forecast_logs WHERE fcst_timestamp = '{forecast_timestamp}' and variable = '{variable}' order by source_time desc limit 1",con=db_connection)
             if len(last_forecast_update)>0:
-                updated_source = last_forecast_update['source_time']
+                updated_source = list(last_forecast_update['source_time'])[0]
                 if updated_source < timestamp:
                     ## delete the forecast table
                     with db_connection.connect() as conn:
@@ -144,7 +144,7 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
             except Exception as e:
                 print("Error Occured on Data EXIM Transfer")
                 print(e)    
-        
+                  
         else:
             print(f"File already exists {file_name}")
     except Exception as e:
