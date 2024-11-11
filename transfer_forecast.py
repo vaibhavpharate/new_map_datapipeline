@@ -10,7 +10,7 @@ from sqlalchemy import text
 import gc
 gc.collect()  # This will manually trigger Python's garbage collector
 
-from multiprocessing import Pool
+
 from configs.paths import source_ip,key_path,source_path,destination_path, source_exim_path,destination_path_exim
 from configs.db_config import data_configs_map, data_send
 from db_functions import get_connection,get_transferred_files,get_last_read_file,get_latest_var_read_file
@@ -46,6 +46,14 @@ data_connection = get_connection(host=data_send['host'],
                                user=data_send['user'],
                                database=data_send['database'],
                                port=data_send['port'])
+
+variables = ['CT','CTTH']
+
+ct_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
+ctth_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
+exim_format = {'CT':ct_exim_format,"CTTH":ctth_exim_format}
+# get list of exim files
+
 ## do it for ct now
 def get_ssh():
     ssh = paramiko.SSHClient() ## Create the SSH object
@@ -58,15 +66,6 @@ def get_ssh():
     else:
         print("Connected Securely to the Source Server")
     return ssh
-
-ssh_client = get_ssh()
-variables = ['CT','CTTH']
-
-ct_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
-ctth_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
-exim_format = {'CT':ct_exim_format,"CTTH":ctth_exim_format}
-# get list of exim files
-
 
 
 
@@ -151,52 +150,9 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
         print("Error at EXIM transfer files")
         print(e)
     
-
-def process_timestamp(row):
-    # Assume these are initialized somewhere in your main code
-    ssh_client = ssh_client  # SSH client setup
-    latest_timestamp_read = row['timestamp'] - timedelta(hours=5,minutes=30)
-    usa_date = latest_timestamp_read.strftime("%Y%m%d")    # Date information
-    var = row['variable']
-    db_connection = db_connection  # Database connection
-    data_connection = data_connection  # Data connection
-
-    # Transfer files and get dataframe
-    df = transfer_exim_files(ssh_client=ssh_client,
-                             usa_date=usa_date,
-                             timestamp=row['timestamp'],
-                             forecast_timestamp=row['forecasted_for'],
-                             variable=var,
-                             file_name=row['file'],
-                             db_connection=db_connection,
-                             data_connection=data_connection)
-
-    # Filter dataframe if needed
-    for x in variable_atts[row['variable']]:
-        if len(df) > 0:
-            df = df.loc[~df[x].isna(), :]
-
-    # Insert data into the database
-    if len(df) > 0:
-        resp = df.to_sql(schema='data_forecast',
-                  name=var.lower(),
-                  index=False,
-                  if_exists='append',
-                  con=data_connection,
-                  method='multi',
-                  chunksize=100000)
-    if resp:
-            
-        df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
-                                          'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
-        df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
-        with data_connection.connect() as conn:
-            conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
-            conn.commit()
-            print("DELETING old timestamps")
     
 
-
+ssh_client = get_ssh()
 send_df = pd.DataFrame()
 for var in variables:
     # print(var)
@@ -214,44 +170,38 @@ for var in variables:
     if len(exim_files)> 0:
         target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
         target_files = target_files.sort_values('forecasted_for',ascending=False)
-        pool_len = target_files['forecasted_for'].nunique()
-        with Pool(processes=pool_len) as pool:
-            # Map the DataFrame rows to the process_timestamp function
-            results = pool.map(process_timestamp, [row for _, row in target_files.iterrows()])
-        
-        # for index,row in target_files.iterrows():
+        for index,row in target_files.iterrows():
             
-        #     df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
-        #                    timestamp=row['timestamp'],
-        #                    forecast_timestamp=row['forecasted_for'],
-        #                    variable=var,file_name=row['file'],
-        #                    db_connection=db_connection,
-        #                    data_connection=data_connection)
-        #     for x in variable_atts[row['variable']]:
-        #         if len(df)>0:
-        #             df = df.loc[~df[x].isna(),:]
+            df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
+                           timestamp=row['timestamp'],
+                           forecast_timestamp=row['forecasted_for'],
+                           variable=var,file_name=row['file'],
+                           db_connection=db_connection,
+                           data_connection=data_connection)
+            for x in variable_atts[row['variable']]:
+                if len(df)>0:
+                    df = df.loc[~df[x].isna(),:]
                     
-        #     resp = df.to_sql(schema='data_forecast',
-        #                          name=var.lower(),
-        #                          index=False,
-        #                          if_exists='append',
-        #                          con=data_connection,
-        #                          method='multi',          # Batch inserts
-        #                          chunksize=100000)
+            resp = df.to_sql(schema='data_forecast',
+                                 name=var.lower(),
+                                 index=False,
+                                 if_exists='append',
+                                 con=data_connection,
+                                 method='multi',          # Batch inserts
+                                 chunksize=100000)
             
             
                 
-        #     if resp:
+            if resp:
             
-        #         df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
-        #                                   'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
-        #         df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
-        #     with data_connection.connect() as conn:
-        #         conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
-        #         conn.commit()
-        #         print("DELETING old timestamps")
-            
-        ############################################        
+                df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
+                                          'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
+                df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
+            with data_connection.connect() as conn:
+                conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
+                conn.commit()
+                print("DELETING old timestamps")
+                
             # df.to_csv(f"{index}.csv")
         #     if len(var_df) ==0 and len(df)>0:
         #         var_df = df
