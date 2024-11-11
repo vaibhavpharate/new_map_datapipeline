@@ -150,6 +150,48 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
         print("Error at EXIM transfer files")
         print(e)
     
+
+def process_timestamp(row):
+    # Assume these are initialized somewhere in your main code
+    ssh_client = ...  # SSH client setup
+    usa_date = ...    # Date information
+    var = row['variable']
+    db_connection = ...  # Database connection
+    data_connection = ...  # Data connection
+
+    # Transfer files and get dataframe
+    df = transfer_exim_files(ssh_client=ssh_client,
+                             usa_date=usa_date,
+                             timestamp=row['timestamp'],
+                             forecast_timestamp=row['forecasted_for'],
+                             variable=var,
+                             file_name=row['file'],
+                             db_connection=db_connection,
+                             data_connection=data_connection)
+
+    # Filter dataframe if needed
+    for x in variable_atts[row['variable']]:
+        if len(df) > 0:
+            df = df.loc[~df[x].isna(), :]
+
+    # Insert data into the database
+    if len(df) > 0:
+        resp = df.to_sql(schema='data_forecast',
+                  name=var.lower(),
+                  index=False,
+                  if_exists='append',
+                  con=data_connection,
+                  method='multi',
+                  chunksize=100000)
+    if resp:
+            
+        df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
+                                          'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
+        df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
+        with data_connection.connect() as conn:
+            conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
+            conn.commit()
+            print("DELETING old timestamps")
     
 
 ssh_client = get_ssh()
@@ -170,39 +212,44 @@ for var in variables:
     if len(exim_files)> 0:
         target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
         target_files = target_files.sort_values('forecasted_for',ascending=False)
-        for index,row in target_files.iterrows():
+        pool_len = target_files['forecasted_for'].nunique()
+        with Pool(processes=pool_len) as pool:
+            # Map the DataFrame rows to the process_timestamp function
+            results = pool.map(process_timestamp, [row for _, row in target_files.iterrows()])
+        
+        # for index,row in target_files.iterrows():
             
-            df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
-                           timestamp=row['timestamp'],
-                           forecast_timestamp=row['forecasted_for'],
-                           variable=var,file_name=row['file'],
-                           db_connection=db_connection,
-                           data_connection=data_connection)
-            for x in variable_atts[row['variable']]:
-                if len(df)>0:
-                    df = df.loc[~df[x].isna(),:]
+        #     df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
+        #                    timestamp=row['timestamp'],
+        #                    forecast_timestamp=row['forecasted_for'],
+        #                    variable=var,file_name=row['file'],
+        #                    db_connection=db_connection,
+        #                    data_connection=data_connection)
+        #     for x in variable_atts[row['variable']]:
+        #         if len(df)>0:
+        #             df = df.loc[~df[x].isna(),:]
                     
-            resp = df.to_sql(schema='data_forecast',
-                                 name=var.lower(),
-                                 index=False,
-                                 if_exists='append',
-                                 con=data_connection,
-                                 method='multi',          # Batch inserts
-                                 chunksize=100000)
+        #     resp = df.to_sql(schema='data_forecast',
+        #                          name=var.lower(),
+        #                          index=False,
+        #                          if_exists='append',
+        #                          con=data_connection,
+        #                          method='multi',          # Batch inserts
+        #                          chunksize=100000)
             
             
                 
-            if resp:
+        #     if resp:
             
-                df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
-                                          'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
-                df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
-            with data_connection.connect() as conn:
-                conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
-                conn.commit()
-                print("DELETING old timestamps")
+        #         df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
+        #                                   'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
+        #         df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
+        #     with data_connection.connect() as conn:
+        #         conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
+        #         conn.commit()
+        #         print("DELETING old timestamps")
             
-                
+        ############################################        
             # df.to_csv(f"{index}.csv")
         #     if len(var_df) ==0 and len(df)>0:
         #         var_df = df
