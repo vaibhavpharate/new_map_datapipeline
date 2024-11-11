@@ -7,3 +7,4 @@ CSV_Forecast/
 /SAFNWC
 /notebook
 notebook/
+transfer_forecast_beta.py
