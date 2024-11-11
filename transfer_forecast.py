@@ -46,14 +46,6 @@ data_connection = get_connection(host=data_send['host'],
                                user=data_send['user'],
                                database=data_send['database'],
                                port=data_send['port'])
-
-variables = ['CT','CTTH']
-
-ct_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
-ctth_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
-exim_format = {'CT':ct_exim_format,"CTTH":ctth_exim_format}
-# get list of exim files
-
 ## do it for ct now
 def get_ssh():
     ssh = paramiko.SSHClient() ## Create the SSH object
@@ -66,6 +58,15 @@ def get_ssh():
     else:
         print("Connected Securely to the Source Server")
     return ssh
+
+ssh_client = get_ssh()
+variables = ['CT','CTTH']
+
+ct_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
+ctth_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
+exim_format = {'CT':ct_exim_format,"CTTH":ctth_exim_format}
+# get list of exim files
+
 
 
 
@@ -195,7 +196,7 @@ def process_timestamp(row):
             print("DELETING old timestamps")
     
 
-ssh_client = get_ssh()
+
 send_df = pd.DataFrame()
 for var in variables:
     # print(var)
