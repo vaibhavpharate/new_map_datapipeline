@@ -7,6 +7,8 @@ import shutil
 import numpy as np
 import netCDF4 as nc
 from sqlalchemy import text
+import gc
+gc.collect()  # This will manually trigger Python's garbage collector
 
 
 from configs.paths import source_ip,key_path,source_path,destination_path, source_exim_path,destination_path_exim
@@ -29,7 +31,7 @@ def get_last_15th():
     previous_15_minute = now - timedelta(minutes=minutes_to_subtract, seconds=now.second, microseconds=now.microsecond)
     return previous_15_minute
 # Print the result
-forecast_end = get_last_15th() + timedelta(hours=fcst_thld) 
+forecast_end = get_last_15th()  
 
 
 db_connection = get_connection(host=data_configs_map['host'],
@@ -119,8 +121,8 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
                 if updated_source < timestamp:
                     ## delete the forecast table
                     with data_connection.connect() as conn:
-                        print("Deleting prev forecasst")
-                        conn.execute(text(f"DELETE FROM data_forecast.{variable.lower()} WHERE timestamp='{forecast_timestamp}'"))
+                        print("UPDATING prev forecasst")
+                        conn.execute(text(f"UPDATE data_forecast.{variable.lower()} SET st='o' WHERE timestamp='{forecast_timestamp}'"))
                         conn.commit()
                 elif updated_source == timestamp:
                     print("Latest source forecast already in place")
@@ -137,23 +139,10 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
                 fill_value = data.variables[i].getncattr('_FillValue') if '_FillValue' in data.variables[i].ncattrs() else None
                 df[i] = np.array(data.variables[i][:]).flatten()
                 df.loc[df[i]==fill_value,i] = None
+                df['st'] = 'n'
+                
             return df
-            # try:
-            # # check if the data exists
-            #     resp = df.to_sql(schema='data_forecast',
-            #                      name=variable.lower(),
-            #                      index=False,
-            #                      if_exists='append',
-            #                      con=data_connection,
-            #                      method='multi',          # Batch inserts
-            #                      chunksize=10000)
-            #     if resp:
-            #         df_db = pd.DataFrame({'fcst_timestamp':[forecast_timestamp],'variable':[variable],'source_time':[timestamp],
-            #                               'log_ts':[datetime.now()],'file':[file_name],'read_status':[1]})
-            #         df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
-            # except Exception as e:
-            #     print("Error Occured on Data EXIM Transfer")
-            #     print(e)
+            
         else:
             print(f"File already exists {file_name}")
             return pd.DataFrame()
@@ -187,18 +176,20 @@ for var in variables:
                            variable=var,file_name=row['file'],
                            db_connection=db_connection,
                            data_connection=data_connection)
+            df.to_csv(f"{index}.csv")
             if len(var_df) ==0 and len(df)>0:
                 var_df = df
             else:
                 var_df = pd.concat([var_df,df])
         # print(len(var_df))
+        var_df.to_csv("asdasd.csv",index=False)
         resp = var_df.to_sql(schema='data_forecast',
                                  name=var.lower(),
                                  index=False,
                                  if_exists='append',
                                  con=data_connection,
                                  method='multi',          # Batch inserts
-                                 chunksize=10000)
+                                 chunksize=1000000)
         # # resp = True
         if resp:
             x_df = {'fcst_timestamp':list(target_files['forecasted_for']),'variable':list(target_files['variable']),
