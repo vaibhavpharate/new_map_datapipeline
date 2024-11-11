@@ -110,9 +110,9 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
                 updated_source = list(last_forecast_update['source_time'])[0]
                 if updated_source < timestamp:
                     ## delete the forecast table
-                    with db_connection.connect() as conn:
+                    with data_connection.connect() as conn:
                         print("Deleting prev forecasst")
-                        print(conn.execute(text(f"DELETE FROM data_forecast.{variable.lower()} WHERE timestamp='{forecast_timestamp}'")))
+                        conn.execute(text(f"DELETE FROM data_forecast.{variable.lower()} WHERE timestamp='{forecast_timestamp}'"))
                         conn.commit()
                 elif updated_source == timestamp:
                     print("Latest source forecast already in place")
