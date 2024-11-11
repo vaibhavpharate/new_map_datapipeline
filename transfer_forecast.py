@@ -105,11 +105,13 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
                           index=False)
             ## forecast_time search with old_source timestamp if old_source < new_source delete the forecast
             last_forecast_update = pd.read_sql_query(f"SELECT * FROM files_map_logs.forecast_logs WHERE fcst_timestamp = '{forecast_timestamp}' and variable = '{variable}' order by source_time desc limit 1",con=db_connection)
+            print(last_forecast_update)
             if len(last_forecast_update)>0:
                 updated_source = list(last_forecast_update['source_time'])[0]
                 if updated_source < timestamp:
                     ## delete the forecast table
                     with db_connection.connect() as conn:
+                        print("Deleting prev forecasst")
                         conn.execute(text(f"DELETE FROM data_forecast.{variable.lower()} WHERE timestamp='{forecast_timestamp}'"))
                         conn.commit()
                 elif updated_source == timestamp:
