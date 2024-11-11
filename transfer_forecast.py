@@ -136,7 +136,7 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
                                  if_exists='append',
                                  con=data_connection,
                                  method='multi',          # Batch inserts
-                                 chunksize=1000)
+                                 chunksize=10000)
                 if resp:
                     df_db = pd.DataFrame({'fcst_timestamp':[forecast_timestamp],'variable':[variable],'source_time':[timestamp],
                                           'log_ts':[datetime.now()],'file':[file_name],'read_status':[1]})
