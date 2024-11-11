@@ -10,7 +10,7 @@ from sqlalchemy import text
 import gc
 gc.collect()  # This will manually trigger Python's garbage collector
 
-
+from multiprocessing import Pool
 from configs.paths import source_ip,key_path,source_path,destination_path, source_exim_path,destination_path_exim
 from configs.db_config import data_configs_map, data_send
 from db_functions import get_connection,get_transferred_files,get_last_read_file,get_latest_var_read_file
@@ -169,6 +169,7 @@ for var in variables:
     var_df = pd.DataFrame()
     if len(exim_files)> 0:
         target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
+        target_files = target_files.sort_values('forecasted_for',ascending=False)
         for index,row in target_files.iterrows():
             
             df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
@@ -177,60 +178,65 @@ for var in variables:
                            variable=var,file_name=row['file'],
                            db_connection=db_connection,
                            data_connection=data_connection)
-            # for x in variable_atts[row['variable']]:
-            #     if len(df)>0:
-            #         df = df.loc[~df[x].isna(),:]
+            for x in variable_atts[row['variable']]:
+                if len(df)>0:
+                    df = df.loc[~df[x].isna(),:]
                     
-            # resp = df.to_sql(schema='data_forecast',
-            #                      name=var.lower(),
-            #                      index=False,
-            #                      if_exists='append',
-            #                      con=data_connection,
-            #                      method='multi',          # Batch inserts
-            #                      chunksize=100000)
-            
-            
-                
-            # if resp:
-            
-            #     df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
-            #                               'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
-            #     df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
-                
-            # df.to_csv(f"{index}.csv")
-            if len(var_df) ==0 and len(df)>0:
-                var_df = df
-            else:
-                var_df = pd.concat([var_df,df])
-        # print(len(var_df))
-        # var_df.to_csv("asdasd.csv",index=False)
-        for x in variable_atts[row['variable']]:
-                if len(var_df)>0:
-                    var_df = var_df.loc[~var_df[x].isna(),:]
-        resp = var_df.to_sql(schema='data_forecast',
+            resp = df.to_sql(schema='data_forecast',
                                  name=var.lower(),
                                  index=False,
                                  if_exists='append',
                                  con=data_connection,
                                  method='multi',          # Batch inserts
-                                 chunksize=1000000)
-        # # resp = True
-        
-        if resp:
-            x_df = {'fcst_timestamp':list(target_files['forecasted_for']),'variable':list(target_files['variable']),
-                                    'source_time':list(target_files['timestamp']),
-                                        'log_ts':[datetime.now()]*len(target_files),
-                                        'file':list(target_files['file']),'read_status':[1]*len(target_files)}
-            for key,val in x_df.items():
-                    print(f"{key}  {len(val)}")
-            df_db = pd.DataFrame(x_df)
-            # print(df_db)
-            df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
-        for index_in,row_in in target_files.iterrows():
+                                 chunksize=100000)
+            
+            
+                
+            if resp:
+            
+                df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
+                                          'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
+                df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
             with data_connection.connect() as conn:
-                conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row_in['forecasted_for']}' and st='o'"))
+                conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
                 conn.commit()
                 print("DELETING old timestamps")
+            
+                
+            # df.to_csv(f"{index}.csv")
+        #     if len(var_df) ==0 and len(df)>0:
+        #         var_df = df
+        #     else:
+        #         var_df = pd.concat([var_df,df])
+        # # print(len(var_df))
+        # # var_df.to_csv("asdasd.csv",index=False)
+        # for x in variable_atts[row['variable']]:
+        #         if len(var_df)>0:
+        #             var_df = var_df.loc[~var_df[x].isna(),:]
+        # resp = var_df.to_sql(schema='data_forecast',
+        #                          name=var.lower(),
+        #                          index=False,
+        #                          if_exists='append',
+        #                          con=data_connection,
+        #                          method='multi',          # Batch inserts
+        #                          chunksize=1000000)
+        # # # resp = True
+        
+        # if resp:
+        #     x_df = {'fcst_timestamp':list(target_files['forecasted_for']),'variable':list(target_files['variable']),
+        #                             'source_time':list(target_files['timestamp']),
+        #                                 'log_ts':[datetime.now()]*len(target_files),
+        #                                 'file':list(target_files['file']),'read_status':[1]*len(target_files)}
+        #     for key,val in x_df.items():
+        #             print(f"{key}  {len(val)}")
+        #     df_db = pd.DataFrame(x_df)
+        #     # print(df_db)
+        #     df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
+        # for index_in,row_in in target_files.iterrows():
+        #     with data_connection.connect() as conn:
+        #         conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row_in['forecasted_for']}' and st='o'"))
+        #         conn.commit()
+        #         print("DELETING old timestamps")
             
     else:
         print(f"NO EXIM files for {var}")
