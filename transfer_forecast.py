@@ -153,11 +153,12 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
 
 def process_timestamp(row):
     # Assume these are initialized somewhere in your main code
-    ssh_client = ...  # SSH client setup
-    usa_date = ...    # Date information
+    ssh_client = ssh_client  # SSH client setup
+    latest_timestamp_read = row['timestamp'] - timedelta(hours=5,minutes=30)
+    usa_date = latest_timestamp_read.strftime("%Y%m%d")    # Date information
     var = row['variable']
-    db_connection = ...  # Database connection
-    data_connection = ...  # Data connection
+    db_connection = db_connection  # Database connection
+    data_connection = data_connection  # Data connection
 
     # Transfer files and get dataframe
     df = transfer_exim_files(ssh_client=ssh_client,
