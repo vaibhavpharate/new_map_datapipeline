@@ -197,13 +197,13 @@ for var in variables:
             #                               'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
             #     df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
                 
-            df.to_csv(f"{index}.csv")
+            # df.to_csv(f"{index}.csv")
             if len(var_df) ==0 and len(df)>0:
                 var_df = df
             else:
                 var_df = pd.concat([var_df,df])
         # print(len(var_df))
-        var_df.to_csv("asdasd.csv",index=False)
+        # var_df.to_csv("asdasd.csv",index=False)
         for x in variable_atts[row['variable']]:
                 if len(var_df)>0:
                     var_df = var_df.loc[~var_df[x].isna(),:]
