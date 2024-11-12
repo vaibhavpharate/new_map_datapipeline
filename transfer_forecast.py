@@ -62,12 +62,13 @@ def get_ssh():
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy()) # no known_hosts error
     try:
         ssh.connect(source_ip, username='ubuntu', key_filename=key_path)
+        return ssh
     except Exception as e:
         print("There was an error")
         print(e)
     else:
         print("Connected Securely to the Source Server")
-    return ssh
+    # return ssh
 
 
 
@@ -151,10 +152,11 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
     except Exception as e:
         print("Error at EXIM transfer files")
         print(e)
-    
+    finally:
+        ssh_client.close()
     
 
-ssh_client = get_ssh()
+# ssh_client = get_ssh()
 send_df = pd.DataFrame()
 
             
@@ -269,9 +271,11 @@ if __name__ == "__main__":
             target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
             target_files = target_files.sort_values('forecasted_for',ascending=False)
             pool_len = target_files['forecasted_for'].nunique()
-            with Pool(processes=pool_len) as pool:
-                # Map the DataFrame rows to the process_timestamp function
-                results = pool.map(process_timestamp, [row for _, row in target_files.iterrows()])
+            if pool_len > 1:
+                print(pool_len)
+                with Pool(processes=pool_len) as pool:
+                    # Map the DataFrame rows to the process_timestamp function
+                    results = pool.map(process_timestamp, [row for _, row in target_files.iterrows()])
 
 # for var in variables:
 #     # print(var)
