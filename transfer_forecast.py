@@ -330,7 +330,7 @@ if __name__ == "__main__":
         if len(exim_files)> 0:
             target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
             target_files = target_files.sort_values('forecasted_for',ascending=False)
-            for index,_tf, row_tf in target_files.iterrows():
+            for index_tf, row_tf in target_files.iterrows():
                 transfer_exim_files(ssh_client=ssh_client,
                                     usa_date=usa_date,
                                     timestamp=row_tf['timestamp'],
