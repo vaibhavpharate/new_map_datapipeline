@@ -15,7 +15,9 @@ from configs.paths import source_ip,key_path,source_path,destination_path, sourc
 from configs.db_config import data_configs_map, data_send
 from db_functions import get_connection,get_transferred_files,get_last_read_file,get_latest_var_read_file
 from configs.variables import read_variables,variable_atts
-
+import multiprocessing
+import time
+from multiprocessing import Pool
 date_format = "%Y%m%d"
 timestamp_format = "%Y-%m-%d %H:%M:%S"
 file_timestamp_format = date_format+"T%H%M00Z"
@@ -154,64 +156,182 @@ def transfer_exim_files(ssh_client,usa_date,timestamp,file_name,forecast_timesta
 
 ssh_client = get_ssh()
 send_df = pd.DataFrame()
-for var in variables:
-    # print(var)
-    read_files = get_latest_var_read_file(db_connection=db_connection,var=var)
-    latest_timestamp_read = read_files['timestamp'].max()
-    # forecast_end = latest_timestamp + timedelta(hours=fcst_thld)
-    
-    usa_timestamp = latest_timestamp_read - timedelta(hours=5,minutes=30)
-    usa_date = usa_timestamp.strftime("%Y%m%d")
 
-    exim_files = get_exim_files(ssh_client,usa_date=usa_date)
-    latest_timestamp = exim_files['timestamp'].max()
-    exim_files = exim_files.loc[exim_files['variable']==var,:]
-    var_df = pd.DataFrame()
-    if len(exim_files)> 0:
-        target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
-        target_files = target_files.sort_values('forecasted_for',ascending=False)
-        for index,row in target_files.iterrows():
             
-            df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
-                           timestamp=row['timestamp'],
-                           forecast_timestamp=row['forecasted_for'],
-                           variable=var,file_name=row['file'],
-                           db_connection=db_connection,
-                           data_connection=data_connection)
-            for x in variable_atts[row['variable']]:
-                if len(df)>0:
-                    df = df.loc[~df[x].isna(),:]
-                    
-            resp = df.to_sql(schema='data_forecast',
-                                 name=var.lower(),
-                                 index=False,
-                                 if_exists='append',
-                                 con=data_connection,
-                                 method='multi',          # Batch inserts
-                                 chunksize=100000)
+def process_timestamp(row):
+    date_format = "%Y%m%d"
+    timestamp_format = "%Y-%m-%d %H:%M:%S"
+    file_timestamp_format = date_format+"T%H%M00Z"
+    file_logs_schema = 'files_map_logs'
+    # Assume these are initialized somewhere in your main code
+    ssh_client = get_ssh()  # SSH client setup
+    latest_timestamp_read = row['timestamp'] - timedelta(hours=5,minutes=30)
+    usa_date = latest_timestamp_read.strftime("%Y%m%d")    # Date information
+    var = row['variable']
+    db_connection = get_connection(host=data_configs_map['host'],
+                                passord=data_configs_map['password'],
+                                user=data_configs_map['user'],
+                                database=data_configs_map['database'],
+                                port=data_configs_map['port'])  # Database connection
+    data_connection = get_connection(host=data_send['host'],
+                                passord=data_send['password'],
+                                user=data_send['user'],
+                                database=data_send['database'],
+                                port=data_send['port'])  # Data connection
+
+    # Transfer files and get dataframe
+    df = transfer_exim_files(ssh_client=ssh_client,
+                             usa_date=usa_date,
+                             timestamp=row['timestamp'],
+                             forecast_timestamp=row['forecasted_for'],
+                             variable=var,
+                             file_name=row['file'],
+                             db_connection=db_connection,
+                             data_connection=data_connection)
+
+    # Filter dataframe if needed
+    for x in variable_atts[row['variable']]:
+        if len(df) > 0:
+            df = df.loc[~df[x].isna(), :]
+
+    # Insert data into the database
+    if len(df) > 0:
+        resp = df.to_sql(schema='data_forecast',
+                  name=var.lower(),
+                  index=False,
+                  if_exists='append',
+                  con=data_connection,
+                  method='multi',
+                  chunksize=100000)
+    if resp:
             
-            
-                
-            if resp:
-            
-                df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
+        df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
                                           'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
-                df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
-            with data_connection.connect() as conn:
-                conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
-                conn.commit()
-                print("DELETING old timestamps")
+        df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
+        with data_connection.connect() as conn:
+            conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
+            conn.commit()
+            print("DELETING old timestamps")
+
+
+if __name__ == "__main__":
+    date_format = "%Y%m%d"
+    timestamp_format = "%Y-%m-%d %H:%M:%S"
+    file_timestamp_format = date_format+"T%H%M00Z"
+
+
+    file_logs_schema = 'files_map_logs'
+    ## select the timestamp that was last read
+
+    fcst_thld = 1 # this is in hours
+
+    # Print the result
+    forecast_end = get_last_15th() + timedelta(hours=fcst_thld) # + timedelta(hours=5,minutes=30)
+
+
+    db_connection = get_connection(host=data_configs_map['host'],
+                                passord=data_configs_map['password'],
+                                user=data_configs_map['user'],
+                                database=data_configs_map['database'],
+                                port=data_configs_map['port'])
+
+
+    data_connection = get_connection(host=data_send['host'],
+                                passord=data_send['password'],
+                                user=data_send['user'],
+                                database=data_send['database'],
+                                port=data_send['port'])
+
+    ssh_client = get_ssh()
+    variables = ['CT','CTTH']
+
+    ct_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
+    ctth_exim_format = 'S_NWC_EXIM-CT_MSG2_IODC-VISIR'
+    exim_format = {'CT':ct_exim_format,"CTTH":ctth_exim_format}
+    # get list of exim files
+
+
+    send_df = pd.DataFrame()
+    for var in variables:
+        # print(var)
+        read_files = get_latest_var_read_file(db_connection=db_connection,var=var)
+        latest_timestamp_read = read_files['timestamp'].max()
+        # forecast_end = latest_timestamp + timedelta(hours=fcst_thld)
+        
+        usa_timestamp = latest_timestamp_read - timedelta(hours=5,minutes=30)
+        usa_date = usa_timestamp.strftime("%Y%m%d")
+
+        exim_files = get_exim_files(ssh_client,usa_date=usa_date)
+        latest_timestamp = exim_files['timestamp'].max()
+        exim_files = exim_files.loc[exim_files['variable']==var,:]
+        var_df = pd.DataFrame()
+        if len(exim_files)> 0:
+            target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
+            target_files = target_files.sort_values('forecasted_for',ascending=False)
+            pool_len = target_files['forecasted_for'].nunique()
+            with Pool(processes=pool_len) as pool:
+                # Map the DataFrame rows to the process_timestamp function
+                results = pool.map(process_timestamp, [row for _, row in target_files.iterrows()])
+
+# for var in variables:
+#     # print(var)
+#     read_files = get_latest_var_read_file(db_connection=db_connection,var=var)
+#     latest_timestamp_read = read_files['timestamp'].max()
+#     # forecast_end = latest_timestamp + timedelta(hours=fcst_thld)
+    
+#     usa_timestamp = latest_timestamp_read - timedelta(hours=5,minutes=30)
+#     usa_date = usa_timestamp.strftime("%Y%m%d")
+
+#     exim_files = get_exim_files(ssh_client,usa_date=usa_date)
+#     latest_timestamp = exim_files['timestamp'].max()
+#     exim_files = exim_files.loc[exim_files['variable']==var,:]
+#     var_df = pd.DataFrame()
+#     if len(exim_files)> 0:
+#         target_files = exim_files.loc[((exim_files['timestamp']>=latest_timestamp)&(exim_files['forecasted_for']<=forecast_end)),:]
+#         target_files = target_files.sort_values('forecasted_for',ascending=False)
+#         for index,row in target_files.iterrows():
+            
+#             df = transfer_exim_files(ssh_client=ssh_client,usa_date=usa_date,
+#                            timestamp=row['timestamp'],
+#                            forecast_timestamp=row['forecasted_for'],
+#                            variable=var,file_name=row['file'],
+#                            db_connection=db_connection,
+#                            data_connection=data_connection)
+#             for x in variable_atts[row['variable']]:
+#                 if len(df)>0:
+#                     df = df.loc[~df[x].isna(),:]
+                    
+#             resp = df.to_sql(schema='data_forecast',
+#                                  name=var.lower(),
+#                                  index=False,
+#                                  if_exists='append',
+#                                  con=data_connection,
+#                                  method='multi',          # Batch inserts
+#                                  chunksize=100000)
+            
+            
                 
-            # df.to_csv(f"{index}.csv")
-        #     if len(var_df) ==0 and len(df)>0:
-        #         var_df = df
-        #     else:
-        #         var_df = pd.concat([var_df,df])
-        # # print(len(var_df))
-        # # var_df.to_csv("asdasd.csv",index=False)
-        # for x in variable_atts[row['variable']]:
-        #         if len(var_df)>0:
-        #             var_df = var_df.loc[~var_df[x].isna(),:]
+#             if resp:
+            
+#                 df_db = pd.DataFrame({'fcst_timestamp':[row['forecasted_for']],'variable':[row['variable']],'source_time':[row['timestamp']],
+#                                           'log_ts':[datetime.now()],'file':[row['file']],'read_status':[1]})
+#                 df_db.to_sql(schema=file_logs_schema,name='forecast_logs',if_exists='append',con=db_connection,index=False)
+#             with data_connection.connect() as conn:
+#                 conn.execute(text(f"DELETE FROM data_forecast.ct WHERE timestamp='{row['forecasted_for']}' and st='o'"))
+#                 conn.commit()
+#                 print("DELETING old timestamps")
+                
+#             # df.to_csv(f"{index}.csv")
+#             if len(var_df) ==0 and len(df)>0:
+#                 var_df = df
+#             else:
+#                 var_df = pd.concat([var_df,df])
+#         # print(len(var_df))
+#         # var_df.to_csv("asdasd.csv",index=False)
+#         for x in variable_atts[row['variable']]:
+#                 if len(var_df)>0:
+#                     var_df = var_df.loc[~var_df[x].isna(),:]
+        
         # resp = var_df.to_sql(schema='data_forecast',
         #                          name=var.lower(),
         #                          index=False,
@@ -237,8 +357,8 @@ for var in variables:
         #         conn.commit()
         #         print("DELETING old timestamps")
             
-    else:
-        print(f"NO EXIM files for {var}")
+    # else:
+    #     print(f"NO EXIM files for {var}")
 
 
 
